@@ -77,10 +77,11 @@ sudo reboot
 ## 📦 Installation
 
 1. Clone the repository or download the script:
-   git clone https://github.com/dennishilk/nvidia-cuda-installer.git
+   git clone https://github.com/dennishilk/nvidia-driver.git
+   
    cd nvidia-cuda-installer
   
-2. Make the script executable:
+3. Make the script executable:
    chmod +x install-nvidia-cuda.sh
 
 4. Run with root privileges:
