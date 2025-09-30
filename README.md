@@ -95,3 +95,11 @@ sudo reboot
    nvcc --version
 
     <a href="https://www.buymeacoffee.com/dennishilk" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+
+
+
+No Warranty Disclaimer
+
+The software in this repository is provided "as is", without warranty of any kind.
+I make no guarantees regarding the functionality, correctness, or suitability of this code for any purpose.
+Use it at your own risk. I am not responsible for any damages, data loss, or issues that may arise from using this software.
