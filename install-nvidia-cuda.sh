@@ -78,6 +78,7 @@ need_cmd sed
 need_cmd lspci
 need_cmd apt
 need_cmd dpkg
+need_cmd apt-cache
 need_cmd tee
 
 # ----------------------------
@@ -85,6 +86,8 @@ need_cmd tee
 # ----------------------------
 KERNEL="$(uname -r)"
 SESSION="${XDG_SESSION_TYPE:-unknown}"
+ARCH="$(dpkg --print-architecture)"
+SECURE_BOOT_ENABLED=0
 
 info "Kernel:  ${KERNEL}"
 info "Session: ${SESSION}"
@@ -95,8 +98,10 @@ fi
 # Secure Boot hint (best-effort)
 if command -v mokutil >/dev/null 2>&1; then
   if mokutil --sb-state 2>/dev/null | grep -qi "enabled"; then
+    SECURE_BOOT_ENABLED=1
     warn "Secure Boot appears ENABLED. Unsigned NVIDIA modules may fail to load."
     warn "If the driver does not load: disable Secure Boot or enroll/sign modules (MOK)."
+    warn "Tip: update-secureboot-policy --enroll-key (requires secureboot-policy package)."
   fi
 fi
 
@@ -164,6 +169,19 @@ if ! check_nonfree_sources; then
 fi
 ok "APT sources look good (non-free + non-free-firmware detected)."
 echo
+
+has_suite_sources() {
+  local suite="$1"
+  local sources=()
+  [[ -f /etc/apt/sources.list ]] && sources+=("/etc/apt/sources.list")
+  if compgen -G "/etc/apt/sources.list.d/*.list" >/dev/null; then
+    sources+=(/etc/apt/sources.list.d/*.list)
+  fi
+
+  local all_text
+  all_text="$(cat "${sources[@]}" 2>/dev/null || true)"
+  echo "$all_text" | grep -Eq "^[[:space:]]*deb[[:space:]].*\\b${suite}\\b"
+}
 
 # ----------------------------
 # Smart APT/dpkg lock monitor (SAFE)
@@ -253,9 +271,17 @@ install_common_deps() {
   apt update
 
   progress "Installing build deps + headers"
-  apt install -y --no-install-recommends \
-    dkms build-essential "linux-headers-${KERNEL}" \
-    firmware-misc-nonfree
+  local packages=(dkms build-essential firmware-misc-nonfree)
+  if [[ "${ARCH}" == "amd64" ]]; then
+    packages+=(linux-headers-amd64)
+  fi
+  if apt-cache show "linux-headers-${KERNEL}" >/dev/null 2>&1; then
+    packages+=("linux-headers-${KERNEL}")
+  else
+    warn "No exact headers for running kernel found: linux-headers-${KERNEL}"
+    warn "Consider rebooting into the newest kernel or installing linux-headers-${ARCH}."
+  fi
+  apt install -y --no-install-recommends "${packages[@]}"
 }
 
 # ----------------------------
@@ -278,6 +304,16 @@ unblacklist_nouveau() {
 # NVIDIA remove/clean
 # ----------------------------
 remove_nvidia() {
+  local installed
+  installed="$(dpkg-query -W -f='${Package}\n' 'nvidia-*' 2>/dev/null || true)"
+  if [[ -n "${installed}" ]]; then
+    warn "Installed NVIDIA-related packages that may be removed:"
+    echo "${installed}"
+    warn "This includes CUDA-related packages that match nvidia-*."
+  else
+    info "No installed NVIDIA-related packages detected."
+  fi
+
   progress "Purging NVIDIA packages"
   apt purge -y 'nvidia-*' || true
 
@@ -303,6 +339,8 @@ remove_nvidia() {
 install_cuda_toolkit_debian() {
   warn "Installing CUDA Toolkit from Debian repo (nvidia-cuda-toolkit)."
   warn "Note: This may not be the newest CUDA version, but it is Debian-managed and stable."
+  warn "If you need the newest CUDA, consider NVIDIA's official repo:"
+  warn "https://developer.nvidia.com/cuda-downloads (use with caution on Debian)."
   apt install -y nvidia-cuda-toolkit
   ok "CUDA Toolkit installed (Debian package)."
   echo
@@ -327,9 +365,35 @@ echo
 
 check_locks
 
+handle_secure_boot() {
+  if (( SECURE_BOOT_ENABLED == 1 )); then
+    warn "Secure Boot is enabled. NVIDIA DKMS modules may require MOK enrollment."
+    if confirm "Install secureboot-policy and enroll MOK now?"; then
+      apt update
+      apt install -y secureboot-policy kmod
+      if command -v update-secureboot-policy >/dev/null 2>&1; then
+        update-secureboot-policy --enroll-key || true
+      else
+        warn "update-secureboot-policy not found. Please enroll MOK manually."
+      fi
+      warn "You may be prompted to set a MOK password and reboot to enroll."
+    fi
+  fi
+}
+
+should_write_xorg_snippet() {
+  if [[ "${SESSION}" == "wayland" || "${SESSION}" == "unknown" ]]; then
+    warn "Wayland/unknown session detected. Xorg snippets may be ignored."
+    confirm "Write Xorg driver snippet anyway?"
+    return $?
+  fi
+  return 0
+}
+
 case "${CHOICE}" in
   1)
     info "Installing NVIDIA driver from Debian stable repo..."
+    handle_secure_boot
     remove_nvidia
     unblacklist_nouveau
     install_common_deps
@@ -341,13 +405,16 @@ case "${CHOICE}" in
     progress "Updating initramfs"
     update-initramfs -u
 
-    write_xorg_driver_snippet "nvidia"
+    if should_write_xorg_snippet; then
+      write_xorg_driver_snippet "nvidia"
+    fi
 
     ok "Driver installation finished (Debian stable repo)."
     ;;
 
   2)
     info "Installing NVIDIA driver from Debian backports..."
+    handle_secure_boot
     remove_nvidia
     unblacklist_nouveau
     install_common_deps
@@ -359,6 +426,12 @@ case "${CHOICE}" in
     echo "Example line:"
     echo "  deb http://deb.debian.org/debian ${SUITE} main contrib non-free non-free-firmware"
     echo
+    if ! has_suite_sources "${SUITE}"; then
+      warn "Backports source (${SUITE}) not detected in APT sources."
+      if ! confirm "Continue anyway?"; then
+        die "Enable ${SUITE} in APT sources and re-run."
+      fi
+    fi
 
     progress "Installing nvidia-driver from backports"
     apt install -y -t "${SUITE}" nvidia-driver || die "Backports install failed. Enable ${SUITE} in APT sources."
@@ -367,7 +440,9 @@ case "${CHOICE}" in
     progress "Updating initramfs"
     update-initramfs -u
 
-    write_xorg_driver_snippet "nvidia"
+    if should_write_xorg_snippet; then
+      write_xorg_driver_snippet "nvidia"
+    fi
 
     ok "Driver installation finished (backports)."
     ;;
@@ -383,7 +458,9 @@ case "${CHOICE}" in
     progress "Updating initramfs"
     update-initramfs -u
 
-    write_xorg_driver_snippet "nouveau"
+    if should_write_xorg_snippet; then
+      write_xorg_driver_snippet "nouveau"
+    fi
 
     ok "Nouveau enabled."
     ;;
@@ -407,6 +484,15 @@ case "${CHOICE}" in
     need_cmd curl
     need_cmd wget
 
+    if dpkg -l | grep -q '^ii[[:space:]]\+nvidia-driver'; then
+      warn "Debian nvidia-driver package appears installed."
+      warn "Mixing .run installer with APT can cause conflicts."
+      if ! confirm "Proceed and remove Debian NVIDIA packages?"; then
+        die "Aborted."
+      fi
+    fi
+
+    handle_secure_boot
     remove_nvidia
     unblacklist_nouveau
     install_common_deps
@@ -440,7 +526,9 @@ case "${CHOICE}" in
     progress "Updating initramfs"
     update-initramfs -u
 
-    write_xorg_driver_snippet "nvidia"
+    if should_write_xorg_snippet; then
+      write_xorg_driver_snippet "nvidia"
+    fi
 
     ok ".run driver installation finished (advanced)."
     ;;
