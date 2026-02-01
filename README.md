@@ -79,7 +79,7 @@ sudo reboot
 5. Reboot to load the NVIDIA kernel module:
    sudo reboot
 
-6. Check After reboot:
+6. Check after reboot:
    nvidia-smi
    nvcc --version
 
