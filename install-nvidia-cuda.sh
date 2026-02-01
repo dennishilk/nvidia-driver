@@ -139,6 +139,11 @@ check_nonfree_sources() {
     sources+=(/etc/apt/sources.list.d/*.list)
   fi
 
+  if (( ${#sources[@]} == 0 )); then
+    warn "No APT source files found in /etc/apt/sources.list or /etc/apt/sources.list.d."
+    return 1
+  fi
+
   local all_text
   all_text="$(cat "${sources[@]}" 2>/dev/null || true)"
 
@@ -176,6 +181,10 @@ has_suite_sources() {
   [[ -f /etc/apt/sources.list ]] && sources+=("/etc/apt/sources.list")
   if compgen -G "/etc/apt/sources.list.d/*.list" >/dev/null; then
     sources+=(/etc/apt/sources.list.d/*.list)
+  fi
+
+  if (( ${#sources[@]} == 0 )); then
+    return 1
   fi
 
   local all_text
