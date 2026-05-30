@@ -90,6 +90,7 @@ ARCH="$(dpkg --print-architecture)"
 SECURE_BOOT_ENABLED=0
 
 info "Kernel:  ${KERNEL}"
+info "Architecture: ${ARCH}"
 info "Session: ${SESSION}"
 if [[ "$SESSION" == "wayland" ]]; then
   warn "Wayland session detected. Xorg config tweaks may be ignored (depends on DE)."
@@ -284,11 +285,10 @@ install_common_deps() {
   if [[ "${ARCH}" == "amd64" ]]; then
     packages+=(linux-headers-amd64)
   fi
-  if apt-cache show "linux-headers-${KERNEL}" >/dev/null 2>&1; then
-    packages+=("linux-headers-${KERNEL}")
+  if apt-cache show "linux-headers-${ARCH}" >/dev/null 2>&1; then
+    packages+=("linux-headers-${ARCH}")
   else
-    warn "No exact headers for running kernel found: linux-headers-${KERNEL}"
-    warn "Consider rebooting into the newest kernel or installing linux-headers-${ARCH}."
+    warn "No exact headers for running architecture found: linux-headers-${ARCH}"
   fi
   apt install -y --no-install-recommends "${packages[@]}"
 }
