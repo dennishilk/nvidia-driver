@@ -1,94 +1,120 @@
-# nvidia-driver
-NVIDIA Driver + CUDA Toolkit Installer for Debian 12/13
+# NVIDIA Driver + CUDA Toolkit Installer
 
-This script installs **NVIDIA GPU drivers** and the **CUDA Toolkit** on **Debian 12 (Bookworm)** and **Debian 13 (Trixie)** — automatically and reliably.  
-It uses Debian’s own packages (APT-first, no NVIDIA repo by default) for a stable, Debian-managed setup.
+[![Shell checks](https://github.com/dennishilk/nvidia-driver/actions/workflows/shell-checks.yml/badge.svg)](https://github.com/dennishilk/nvidia-driver/actions/workflows/shell-checks.yml)
 
----
+Interactive, APT-first installer for NVIDIA drivers and the optional CUDA Toolkit on Debian 12 (Bookworm) and Debian 13 (Trixie).
 
-## ✨ Features
-- ✅ Auto-detects Debian **12/13** and **amd64/arm64** architecture
-- ✅ Installs build tools: `build-essential`, `dkms`, `linux-headers-$(uname -r)`
-- ✅ Installs CUDA via the Debian package: `nvidia-cuda-toolkit`
-- ✅ Optionally blacklists **nouveau** to avoid conflicts
-- ✅ Warns if **Secure Boot** is enabled
+The recommended paths use Debian's own packages. The script does not add NVIDIA repositories, force an Xorg configuration, kill package-manager processes, or delete APT lock files.
 
+## Supported systems
 
-🛡️ Secure Boot
+- Debian 12 or 13
+- `amd64` or `arm64`
+- An NVIDIA PCI display device
+- Root access
+- APT sources with `main contrib non-free non-free-firmware`
 
-If Secure Boot is enabled, DKMS may fail to load unsigned modules. Options:
+The advanced NVIDIA `.run` installer is available only on `amd64` and is intentionally not recommended for normal Debian installations.
 
-Disable Secure Boot in firmware, or
+## Features
 
-Enroll a Machine Owner Key (MOK) and sign the module.
+- Installs `nvidia-driver` from Debian stable or an already configured backports suite
+- Installs the Debian `nvidia-cuda-toolkit` package on request
+- Installs both the architecture header metapackage and exact running-kernel headers when available
+- Understands classic `.list` files and modern deb822 `.sources` files
+- Detects Secure Boot when `mokutil` is available and explains MOK enrollment
+- Can switch back to nouveau or remove installed `nvidia-*` packages through APT
+- Fetches current `.run` installer metadata from NVIDIA instead of using a stale hardcoded version
+- Logs output to `/var/log/nvidia-optimizer.log`
 
-The script prints a note when Secure Boot appears enabled.
+## Installation
 
+```bash
+git clone https://github.com/dennishilk/nvidia-driver.git
+cd nvidia-driver
+chmod +x install-nvidia-cuda.sh
+sudo ./install-nvidia-cuda.sh
+```
 
-🚫 Nouveau (Open-Source Driver)
+Choose one of the five menu actions:
 
-The script blacklists nouveau to prevent conflicts:
+1. Install the Debian stable driver (recommended)
+2. Install the driver from an already enabled Debian backports suite
+3. Remove NVIDIA packages and enable nouveau
+4. Remove NVIDIA packages and clean unused dependencies
+5. Install NVIDIA's `.run` driver (advanced, `amd64` only)
 
-Config: /etc/modprobe.d/blacklist-nouveau.conf
+After a driver change, reboot and verify:
 
-Rebuilds initramfs automatically
+```bash
+nvidia-smi
+nvcc --version  # only when the CUDA Toolkit was installed
+```
 
-If you prefer to keep nouveau, remove that file and run sudo update-initramfs -u.
+## APT source requirements
 
+The script accepts both `/etc/apt/sources.list` entries and deb822 files such as `/etc/apt/sources.list.d/debian.sources`.
 
-🧰 Troubleshooting
+For example, a classic Debian 13 source line contains:
 
-Black screen or login loop: Likely driver conflict or Secure Boot. Boot to recovery/TTY, remove conflicting drivers, verify blacklist, check mokutil --sb-state.
+```text
+deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+```
 
-DKMS build fails: Ensure headers match the running kernel:
+Replace `trixie` with `bookworm` on Debian 12. Backports option 2 additionally expects `${VERSION_CODENAME}-backports`, such as `trixie-backports`.
 
+## Secure Boot
+
+With Secure Boot enabled, the NVIDIA DKMS module may not load until its Machine Owner Key is enrolled. If Debian created `/var/lib/dkms/mok.pub`, enroll it with:
+
+```bash
+sudo mokutil --import /var/lib/dkms/mok.pub
+```
+
+Then reboot and complete enrollment in the firmware's MOK Manager. If `mokutil` is missing, install the Debian package of the same name first.
+
+## Troubleshooting
+
+### `Unable to locate package nvidia-cuda-toolkit`
+
+The Debian package is named `nvidia-cuda-toolkit`, not `cuda`. Confirm that `non-free` is enabled, then refresh APT:
+
+```bash
+sudo apt update
+apt-cache policy nvidia-cuda-toolkit
+```
+
+### DKMS build fails
+
+Check whether headers exist for the running kernel:
+
+```bash
 uname -r
-apt-cache policy linux-headers-$(uname -r)
+apt-cache policy "linux-headers-$(uname -r)"
+```
 
-Unable to locate package cuda: Debian repos do not ship the `cuda` meta-package. Use `nvidia-cuda-toolkit` (this script does) or add NVIDIA’s CUDA repo explicitly.
+If only the newer architecture header metapackage was available, reboot into the newly installed Debian kernel and run the driver installation again.
 
+### Black screen or login loop
 
-nvidia-smi not found: Ensure driver packages are installed and reboot if needed.
+From a recovery shell or TTY, inspect:
 
+```bash
+cat /var/log/nvidia-optimizer.log
+dkms status
+sudo mokutil --sb-state
+```
 
-🧩 Uninstall
+Secure Boot, a failed DKMS build, or an old manually installed `.run` driver are the usual causes.
 
-To remove CUDA & drivers:
+## Uninstall or return to nouveau
 
-sudo apt remove --purge 'nvidia-cuda-toolkit*' 'nvidia*'
-sudo rm -f /etc/modprobe.d/blacklist-nouveau.conf
-sudo update-initramfs -u
-sudo apt autoremove -y
-sudo reboot
+Run the script again and choose option 3 or 4. Cleanup is performed through APT; the script does not manually erase `/var/lib/dkms` or user-owned NVIDIA configuration files.
 
+## License and warranty
 
+MIT License. See [LICENSE](LICENSE).
 
-## 📦 Installation
+The software is provided "as is", without warranty of any kind. Use it at your own risk; the author is not responsible for damage, data loss, or other issues caused by its use.
 
-1. Clone the repository or download the script:
-   git clone https://github.com/dennishilk/nvidia-driver.git
-   
-   cd nvidia-driver
-  
-3. Make the script executable:
-   chmod +x install-nvidia-cuda.sh
-
-4. Run with root privileges:
-   sudo ./install-nvidia-cuda.sh
-
-5. Reboot to load the NVIDIA kernel module:
-   sudo reboot
-
-6. Check after reboot:
-   nvidia-smi
-   nvcc --version
-
-    <a href="https://www.buymeacoffee.com/dennishilk" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
-
-
-
-No Warranty Disclaimer
-
-The software in this repository is provided "as is", without warranty of any kind.
-I make no guarantees regarding the functionality, correctness, or suitability of this code for any purpose.
-Use it at your own risk. I am not responsible for any damages, data loss, or issues that may arise from using this software.
+<a href="https://www.buymeacoffee.com/dennishilk"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
